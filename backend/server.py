@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,7 +12,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone
 
-from admet_predictor import get_predictor
+from admet_predictor import get_predictor, parse_smiles_csv, results_to_csv
 
 
 ROOT_DIR = Path(__file__).parent
@@ -56,6 +57,7 @@ class PredictResponse(BaseModel):
     smiles: str
     results: Dict[str, Any]
     descriptors: Dict[str, Any]
+    scaffold: Dict[str, Any]
     latency_ms: int
     source: str  # "model" or "mock"
 
@@ -84,6 +86,7 @@ async def predict_admet(req: PredictRequest):
     start = time.perf_counter()
     try:
         descriptors = predictor.descriptors(smiles)
+        scaffold = predictor.scaffold_info(smiles)
         results = predictor.predict(smiles)
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
@@ -100,6 +103,7 @@ async def predict_admet(req: PredictRequest):
             "smiles": smiles,
             "results": results,
             "descriptors": descriptors,
+            "scaffold": scaffold,
             "latency_ms": latency_ms,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -111,9 +115,132 @@ async def predict_admet(req: PredictRequest):
         smiles=smiles,
         results=results,
         descriptors=descriptors,
+        scaffold=scaffold,
         latency_ms=latency_ms,
         source="model",
     )
+
+
+# ---------- Scaffold-only lookup ----------
+
+class ScaffoldRequest(BaseModel):
+    smiles: str
+
+
+@api_router.post("/scaffold")
+async def scaffold_endpoint(req: ScaffoldRequest):
+    smiles = (req.smiles or "").strip()
+    if not smiles:
+        raise HTTPException(status_code=400, detail="SMILES string is required")
+    predictor = get_predictor()
+    try:
+        return {
+            "smiles": smiles,
+            "scaffold": predictor.scaffold_info(smiles),
+            "descriptors": predictor.descriptors(smiles),
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
+
+
+# ---------- Batch prediction ----------
+
+class BatchPredictRequest(BaseModel):
+    items: List[Dict[str, Any]]  # each: {row_idx?, name?, smiles}
+
+
+class BatchPredictItem(BaseModel):
+    row_idx: int
+    name: Optional[str] = None
+    smiles: str
+    results: Optional[Dict[str, Any]] = None
+    descriptors: Optional[Dict[str, Any]] = None
+    scaffold: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class BatchPredictResponse(BaseModel):
+    count: int
+    ok: int
+    failed: int
+    latency_ms: int
+    items: List[BatchPredictItem]
+
+
+def _run_batch(items: List[dict]) -> List[dict]:
+    predictor = get_predictor()
+    out: List[dict] = []
+    for i, it in enumerate(items):
+        s = (it.get("smiles") or "").strip()
+        row_idx = int(it.get("row_idx") or (i + 1))
+        name = it.get("name") or ""
+        if not s:
+            out.append({"row_idx": row_idx, "name": name, "smiles": s, "error": "empty"})
+            continue
+        try:
+            out.append({
+                "row_idx": row_idx,
+                "name": name,
+                "smiles": s,
+                "results": predictor.predict(s),
+                "descriptors": predictor.descriptors(s),
+                "scaffold": predictor.scaffold_info(s),
+            })
+        except ValueError as ve:
+            out.append({"row_idx": row_idx, "name": name, "smiles": s, "error": str(ve)})
+        except Exception as exc:
+            out.append({"row_idx": row_idx, "name": name, "smiles": s, "error": f"failure: {exc}"})
+    return out
+
+
+@api_router.post("/predict/batch", response_model=BatchPredictResponse)
+async def predict_batch(req: BatchPredictRequest):
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items list is empty")
+    if len(req.items) > 500:
+        raise HTTPException(status_code=413, detail="Max 500 rows per batch")
+    predictor = get_predictor()
+    if not predictor.available:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    start = time.perf_counter()
+    items = _run_batch(req.items)
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    ok = sum(1 for i in items if not i.get("error"))
+    failed = len(items) - ok
+    return BatchPredictResponse(count=len(items), ok=ok, failed=failed, latency_ms=latency_ms, items=items)
+
+
+@api_router.post("/predict/batch/upload", response_model=BatchPredictResponse)
+async def predict_batch_upload(file: UploadFile = File(...)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 2 MB)")
+    items = parse_smiles_csv(content, max_rows=500)
+    if not items:
+        raise HTTPException(status_code=422, detail="No SMILES found in file. Expected a 'smiles' column or SMILES in first column.")
+    predictor = get_predictor()
+    if not predictor.available:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    start = time.perf_counter()
+    ran = _run_batch(items)
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    ok = sum(1 for i in ran if not i.get("error"))
+    failed = len(ran) - ok
+    return BatchPredictResponse(count=len(ran), ok=ok, failed=failed, latency_ms=latency_ms, items=ran)
+
+
+class BatchCsvExportRequest(BaseModel):
+    items: List[Dict[str, Any]]
+
+
+@api_router.post("/predict/batch/export", response_class=PlainTextResponse)
+async def predict_batch_export(req: BatchCsvExportRequest):
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items list is empty")
+    return PlainTextResponse(content=results_to_csv(req.items), media_type="text/csv")
 
 
 class HistoryItem(BaseModel):

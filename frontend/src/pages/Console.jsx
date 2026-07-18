@@ -1,8 +1,6 @@
 import React, { useState } from "react";
-import { ArrowRight, Beaker, ChevronDown, Copy, Check, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowRight, Beaker, ChevronDown, Copy, Check, AlertTriangle, Loader2, Layers, FileUp } from "lucide-react";
 import { EXAMPLES, mockPredict, mockDescriptors } from "../mock";
-import { fmtPct, fmtNum, classFromProb, solubilityTone } from "../lib/format";
-import CircularMeter from "../components/CircularMeter";
 import { toast } from "sonner";
 import axios from "axios";
 import {
@@ -11,6 +9,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "../components/ui/dropdown-menu";
+import { ProbCard, RegressionCard } from "../components/ResultCards";
+import ScaffoldPanel from "../components/ScaffoldPanel";
+import BatchUpload from "../components/BatchUpload";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -21,91 +22,16 @@ function Kicker({ children }) {
   );
 }
 
-function ProbCard({ code, idx, endpoint }) {
-  const { probability, prediction, label, category } = endpoint;
-  const cls = classFromProb(probability);
-  const tone = cls.tone === "good" ? "lime" : cls.tone === "warn" ? "warn" : "pink";
-  const toneText = cls.tone === "good" ? "lime" : cls.tone === "warn" ? "text-[rgb(255_176_66)]" : "text-[rgb(255_74_128)]";
-  return (
-    <div className="bg-bg p-7 min-h-[280px] flex flex-col justify-between border hairline">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="mono text-[10px] ink-mute uppercase tracking-[0.22em]">
-            {String(idx).padStart(2, "0")} / {code}
-          </div>
-          <div className="display text-[22px] mt-4 ink leading-tight">{label}</div>
-          <div className="mono text-[10px] ink-mute uppercase tracking-[0.2em] mt-1">
-            {category}
-          </div>
-        </div>
-        <CircularMeter value={probability} tone={tone} size={92} thickness={5} />
-      </div>
-      <div>
-        <div className="tick my-4" />
-        <div className="flex items-end justify-between">
-          <div>
-            <div className="display text-[44px] leading-none ink">
-              {fmtPct(probability)}
-            </div>
-            <div className="mono text-[10px] ink-mute mt-1 uppercase tracking-[0.2em]">
-              probability
-            </div>
-          </div>
-          <div className={`inline-flex items-center border hairline px-3 py-1 mono text-[10px] uppercase tracking-[0.22em] ${toneText}`}>
-            {prediction}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RegressionCard({ code, idx, endpoint }) {
-  const { value, unit, label, category } = endpoint;
-  const tone = code === "SOL" ? solubilityTone(value) : classFromProb(value / 10);
-  const toneText = tone.tone === "good" ? "lime" : tone.tone === "warn" ? "text-[rgb(255_176_66)]" : "text-[rgb(255_74_128)]";
-  return (
-    <div className="bg-bg p-7 min-h-[280px] flex flex-col justify-between border hairline">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="mono text-[10px] ink-mute uppercase tracking-[0.22em]">
-            {String(idx).padStart(2, "0")} / {code}
-          </div>
-          <div className="display text-[22px] mt-4 ink leading-tight">{label}</div>
-          <div className="mono text-[10px] ink-mute uppercase tracking-[0.2em] mt-1">
-            {category}
-          </div>
-        </div>
-        <div className="mono text-[10px] ink-mute uppercase tracking-[0.22em] px-2 py-1 border hairline">
-          regression
-        </div>
-      </div>
-      <div>
-        <div className="tick my-4" />
-        <div className="flex items-end justify-between">
-          <div>
-            <div className="display text-[44px] leading-none ink">{fmtNum(value, 2)}</div>
-            <div className="mono text-[10px] ink-mute mt-1 uppercase tracking-[0.2em]">{unit}</div>
-          </div>
-          <div className={`inline-flex items-center border hairline px-3 py-1 mono text-[10px] uppercase tracking-[0.22em] ${toneText}`}>
-            {tone.label}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Console() {
+function SingleConsole() {
   const [smiles, setSmiles] = useState("CN1C=NC2=C1C(=O)N(C(=O)N2C)C");
   const [activeExample, setActiveExample] = useState("Caffeine");
   const [results, setResults] = useState(null);
+  const [scaffold, setScaffold] = useState(null);
   const [predictedSmiles, setPredictedSmiles] = useState(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [source, setSource] = useState("mock");
-
   const [descriptors, setDescriptors] = useState(null);
 
   const displayDescriptors = descriptors || mockDescriptors(predictedSmiles || smiles);
@@ -123,6 +49,7 @@ export default function Console() {
       if (res.data && res.data.results) {
         setResults(res.data.results);
         setDescriptors(res.data.descriptors || null);
+        setScaffold(res.data.scaffold || null);
         setPredictedSmiles(smiles.trim());
         setSource(res.data.source || "model");
         toast.success(`Analysed ${smiles.trim().length} chars — 5 endpoints ready`);
@@ -134,11 +61,15 @@ export default function Console() {
       if (detail && typeof detail === "string" && /invalid smiles/i.test(detail)) {
         setError(detail);
         toast.error(detail);
+      } else if (e?.response?.status === 422) {
+        setError(detail || "Invalid SMILES string");
+        toast.error(detail || "Invalid SMILES string");
       } else {
         // fallback to mock
         const mocked = mockPredict(smiles.trim());
         setResults(mocked);
         setDescriptors(null);
+        setScaffold(null);
         setPredictedSmiles(smiles.trim());
         setSource("mock");
         toast.message(`Analysed ${smiles.trim().length} chars — 5 endpoints ready`, {
@@ -165,12 +96,10 @@ export default function Console() {
   };
 
   return (
-    <main className="relative z-10 max-w-[1400px] mx-auto px-8 pt-20 pb-10">
-      {/* Header */}
+    <>
       <div className="grid grid-cols-12 gap-8">
         <div className="col-span-12 lg:col-span-8">
-          <Kicker>The Console</Kicker>
-          <div className="mt-10 flex items-center gap-3 mono text-[11px] ink-mute uppercase tracking-[0.22em]">
+          <div className="mt-2 flex items-center gap-3 mono text-[11px] ink-mute uppercase tracking-[0.22em]">
             <Beaker size={14} className="lime" strokeWidth={1.5} />
             <span>Enter SMILES</span>
           </div>
@@ -295,23 +224,7 @@ export default function Console() {
             <RegressionCard idx={4} code="SOL" endpoint={results.Solubility} />
             <RegressionCard idx={5} code="VDss" endpoint={results.VDss} />
 
-            <div className="border hairline p-7 bg-soft flex flex-col justify-between min-h-[280px]">
-              <div>
-                <div className="mono text-[10px] ink-mute uppercase tracking-[0.22em]">Notes</div>
-                <div className="display text-[22px] mt-4 ink leading-tight">
-                  Interpret with care.
-                </div>
-                <p className="mono text-[12px] ink-dim mt-4 leading-[1.8]">
-                  Predictions are point estimates from a scaffold-split XGBoost. Out-of-distribution
-                  molecules may behave unpredictably — always confirm hits with in-vitro assays.
-                </p>
-              </div>
-              <div className="tick mt-4" />
-              <div className="flex items-center justify-between mt-3">
-                <span className="mono text-[10px] ink-mute uppercase tracking-[0.22em]">calibration</span>
-                <span className="mono text-[11px] ink">isotonic · CV=5</span>
-              </div>
-            </div>
+            <ScaffoldPanel scaffold={scaffold} descriptors={descriptors} />
           </div>
         </section>
       ) : (
@@ -323,7 +236,7 @@ export default function Console() {
             </div>
             <p className="mono text-[12px] ink-dim mt-4 max-w-[520px] leading-[1.9]">
               Type or paste a SMILES string above. Pick one of the sample compounds to see the
-              full five-endpoint readout in under a second.
+              full five-endpoint readout with 80% confidence intervals.
             </p>
           </div>
           <div className="grid grid-cols-5 gap-px border hairline bg-[rgb(30_33_30)] ml-auto">
@@ -335,6 +248,41 @@ export default function Console() {
           </div>
         </section>
       )}
+    </>
+  );
+}
+
+export default function Console() {
+  const [tab, setTab] = useState("single");
+
+  return (
+    <main className="relative z-10 max-w-[1400px] mx-auto px-8 pt-20 pb-10">
+      <Kicker>The Console</Kicker>
+
+      {/* Tabs */}
+      <div className="mt-10 flex items-center gap-1 border-b hairline">
+        <button
+          onClick={() => setTab("single")}
+          className={`mono text-[11px] uppercase tracking-[0.22em] px-4 py-3 border-b -mb-px ${
+            tab === "single" ? "ink border-[rgb(210_255_62)]" : "ink-mute border-transparent"
+          } flex items-center gap-2`}
+        >
+          <Layers size={12} /> Single molecule
+        </button>
+        <button
+          onClick={() => setTab("batch")}
+          data-testid="batch-tab"
+          className={`mono text-[11px] uppercase tracking-[0.22em] px-4 py-3 border-b -mb-px ${
+            tab === "batch" ? "ink border-[rgb(210_255_62)]" : "ink-mute border-transparent"
+          } flex items-center gap-2`}
+        >
+          <FileUp size={12} /> Batch CSV
+        </button>
+      </div>
+
+      <div className="mt-8">
+        {tab === "single" ? <SingleConsole /> : <BatchUpload />}
+      </div>
     </main>
   );
 }

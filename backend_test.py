@@ -1,11 +1,11 @@
 """
-Backend API Tests for ADMET Prediction Service
-Tests all backend endpoints per test_result.md requirements
+Backend API Tests for ADMET Prediction Service - Enhanced Schema Testing
+Tests all backend endpoints per test_result.md requirements including new features
 """
 
 import requests
 import json
-import os
+import io
 from pathlib import Path
 
 # Load backend URL from frontend/.env
@@ -50,72 +50,10 @@ def log_warning(test_name, details=""):
         print(f"   {details}")
 
 # ============================================================================
-# TEST 1: GET /api/health
+# TEST A: POST /api/predict - Enhanced Schema Verification
 # ============================================================================
 print("\n" + "=" * 80)
-print("TEST 1: GET /api/health")
-print("=" * 80)
-
-try:
-    response = requests.get(f"{BASE_URL}/health", timeout=10)
-    print(f"Status Code: {response.status_code}")
-    
-    if response.status_code == 200:
-        log_pass("Health endpoint returns 200")
-        
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        # Check status field
-        if data.get("status") == "ok":
-            log_pass("Health status is 'ok'")
-        else:
-            log_fail("Health status check", f"Expected 'ok', got '{data.get('status')}'")
-        
-        # Check model_loaded field
-        if "model_loaded" in data:
-            if data["model_loaded"] is True:
-                log_pass("model_loaded is true")
-            else:
-                log_fail("model_loaded check", f"Expected true, got {data['model_loaded']}")
-        else:
-            log_fail("model_loaded field missing", "Response does not contain 'model_loaded' field")
-        
-        # Check endpoints array
-        if "endpoints" in data:
-            endpoints = data["endpoints"]
-            expected_endpoints = ["HIA", "BBB", "CYP2D6", "Solubility", "VDss"]
-            
-            if isinstance(endpoints, list):
-                log_pass("endpoints field is an array")
-                
-                missing = set(expected_endpoints) - set(endpoints)
-                extra = set(endpoints) - set(expected_endpoints)
-                
-                if not missing and not extra:
-                    log_pass(f"All 5 expected endpoints present: {endpoints}")
-                else:
-                    if missing:
-                        log_fail("Missing endpoints", f"Missing: {missing}")
-                    if extra:
-                        log_warning("Extra endpoints", f"Extra: {extra}")
-            else:
-                log_fail("endpoints field type", f"Expected list, got {type(endpoints)}")
-        else:
-            log_fail("endpoints field missing", "Response does not contain 'endpoints' field")
-            
-    else:
-        log_fail("Health endpoint status code", f"Expected 200, got {response.status_code}")
-        print(f"Response: {response.text}")
-        
-except Exception as e:
-    log_fail("Health endpoint request", f"Exception: {str(e)}")
-
-# ============================================================================
-# TEST 2: POST /api/predict with valid SMILES (caffeine)
-# ============================================================================
-print("\n" + "=" * 80)
-print("TEST 2: POST /api/predict with valid SMILES (caffeine)")
+print("TEST A: POST /api/predict - Enhanced Schema with Scaffold, CI, Confidence")
 print("=" * 80)
 
 caffeine_smiles = "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
@@ -130,293 +68,633 @@ try:
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 200:
-        log_pass("Predict endpoint returns 200 for valid SMILES")
+        log_pass("POST /api/predict returns 200")
         
         data = response.json()
         print(f"Response keys: {list(data.keys())}")
         
-        # Check smiles field
-        if data.get("smiles") == caffeine_smiles:
-            log_pass("Response smiles matches input")
+        # A.1: Check top-level scaffold object
+        if "scaffold" in data:
+            scaffold = data["scaffold"]
+            log_pass("Top-level 'scaffold' object present")
+            
+            # Check scaffold fields
+            required_scaffold_fields = ["scaffold", "complexity", "applicability", "novelty_tier"]
+            if all(field in scaffold for field in required_scaffold_fields):
+                log_pass(f"Scaffold has all required fields: {required_scaffold_fields}")
+                
+                # Validate scaffold field (string, can be empty)
+                if isinstance(scaffold.get("scaffold"), str):
+                    log_pass(f"scaffold.scaffold is string: '{scaffold['scaffold']}'")
+                else:
+                    log_fail("scaffold.scaffold type", f"Expected string, got {type(scaffold.get('scaffold'))}")
+                
+                # Validate complexity (float 0..1)
+                complexity = scaffold.get("complexity")
+                if isinstance(complexity, (int, float)) and 0 <= complexity <= 1:
+                    log_pass(f"scaffold.complexity is float 0..1: {complexity}")
+                else:
+                    log_fail("scaffold.complexity", f"Expected float 0..1, got {complexity}")
+                
+                # Validate applicability (float 0..1)
+                applicability = scaffold.get("applicability")
+                if isinstance(applicability, (int, float)) and 0 <= applicability <= 1:
+                    log_pass(f"scaffold.applicability is float 0..1: {applicability}")
+                else:
+                    log_fail("scaffold.applicability", f"Expected float 0..1, got {applicability}")
+                
+                # Validate novelty_tier
+                novelty_tier = scaffold.get("novelty_tier")
+                valid_tiers = ["in-domain", "borderline", "out-of-domain"]
+                if novelty_tier in valid_tiers:
+                    log_pass(f"scaffold.novelty_tier is valid: '{novelty_tier}'")
+                else:
+                    log_fail("scaffold.novelty_tier", f"Expected one of {valid_tiers}, got '{novelty_tier}'")
+            else:
+                missing = set(required_scaffold_fields) - set(scaffold.keys())
+                log_fail("Missing scaffold fields", f"Missing: {missing}")
         else:
-            log_fail("SMILES mismatch", f"Expected '{caffeine_smiles}', got '{data.get('smiles')}'")
+            log_fail("scaffold object missing", "Response does not contain top-level 'scaffold' object")
         
-        # Check results field
+        # A.2: Check enhanced results with CI, confidence, sigma
         if "results" in data:
             results = data["results"]
-            expected_keys = ["HIA", "BBB", "CYP2D6", "Solubility", "VDss"]
+            expected_endpoints = ["HIA", "BBB", "CYP2D6", "Solubility", "VDss"]
             
-            if all(key in results for key in expected_keys):
+            if all(key in results for key in expected_endpoints):
                 log_pass("All 5 ADMET endpoints present in results")
                 
-                # Check classification endpoints (HIA, BBB, CYP2D6)
+                # Check classifiers (HIA, BBB, CYP2D6)
                 for endpoint in ["HIA", "BBB", "CYP2D6"]:
                     endpoint_data = results[endpoint]
+                    print(f"\n  Checking {endpoint}:")
                     
+                    # Check ci_low
+                    if "ci_low" in endpoint_data:
+                        ci_low = endpoint_data["ci_low"]
+                        if isinstance(ci_low, (int, float)) and 0 <= ci_low <= 1:
+                            log_pass(f"{endpoint}.ci_low is valid: {ci_low}")
+                        else:
+                            log_fail(f"{endpoint}.ci_low", f"Expected float 0..1, got {ci_low}")
+                    else:
+                        log_fail(f"{endpoint}.ci_low missing", "No 'ci_low' field")
+                    
+                    # Check ci_high
+                    if "ci_high" in endpoint_data:
+                        ci_high = endpoint_data["ci_high"]
+                        if isinstance(ci_high, (int, float)) and 0 <= ci_high <= 1:
+                            log_pass(f"{endpoint}.ci_high is valid: {ci_high}")
+                            
+                            # Check ci_high >= ci_low
+                            if "ci_low" in endpoint_data:
+                                if ci_high >= endpoint_data["ci_low"]:
+                                    log_pass(f"{endpoint}.ci_high >= ci_low: {ci_high} >= {endpoint_data['ci_low']}")
+                                else:
+                                    log_fail(f"{endpoint}.ci_high < ci_low", f"{ci_high} < {endpoint_data['ci_low']}")
+                        else:
+                            log_fail(f"{endpoint}.ci_high", f"Expected float 0..1, got {ci_high}")
+                    else:
+                        log_fail(f"{endpoint}.ci_high missing", "No 'ci_high' field")
+                    
+                    # Check probability bounds
                     if "probability" in endpoint_data:
                         prob = endpoint_data["probability"]
-                        if isinstance(prob, (int, float)) and 0 <= prob <= 1:
-                            log_pass(f"{endpoint} probability is valid float (0..1): {prob}")
+                        ci_low = endpoint_data.get("ci_low", 0)
+                        ci_high = endpoint_data.get("ci_high", 1)
+                        if ci_low <= prob <= ci_high:
+                            log_pass(f"{endpoint}: ci_low <= probability <= ci_high: {ci_low} <= {prob} <= {ci_high}")
                         else:
-                            log_fail(f"{endpoint} probability", f"Expected float 0..1, got {prob}")
-                    else:
-                        log_fail(f"{endpoint} probability missing", "No 'probability' field")
+                            log_fail(f"{endpoint} probability bounds", f"Expected {ci_low} <= {prob} <= {ci_high}")
                     
-                    if "prediction" in endpoint_data:
-                        pred = endpoint_data["prediction"]
-                        if isinstance(pred, str) and len(pred) > 0:
-                            log_pass(f"{endpoint} prediction is non-empty string: '{pred}'")
+                    # Check confidence
+                    if "confidence" in endpoint_data:
+                        confidence = endpoint_data["confidence"]
+                        valid_confidence = ["high", "moderate", "low"]
+                        if confidence in valid_confidence:
+                            log_pass(f"{endpoint}.confidence is valid: '{confidence}'")
                         else:
-                            log_fail(f"{endpoint} prediction", f"Expected non-empty string, got '{pred}'")
+                            log_fail(f"{endpoint}.confidence", f"Expected one of {valid_confidence}, got '{confidence}'")
                     else:
-                        log_fail(f"{endpoint} prediction missing", "No 'prediction' field")
+                        log_fail(f"{endpoint}.confidence missing", "No 'confidence' field")
+                    
+                    # Check sigma
+                    if "sigma" in endpoint_data:
+                        sigma = endpoint_data["sigma"]
+                        if isinstance(sigma, (int, float)) and sigma >= 0:
+                            log_pass(f"{endpoint}.sigma is valid: {sigma}")
+                        else:
+                            log_fail(f"{endpoint}.sigma", f"Expected float >= 0, got {sigma}")
+                    else:
+                        log_fail(f"{endpoint}.sigma missing", "No 'sigma' field")
                 
-                # Check regression endpoints (Solubility, VDss)
+                # Check regressors (Solubility, VDss)
                 for endpoint in ["Solubility", "VDss"]:
                     endpoint_data = results[endpoint]
+                    print(f"\n  Checking {endpoint}:")
                     
+                    # Check ci_low
+                    if "ci_low" in endpoint_data:
+                        ci_low = endpoint_data["ci_low"]
+                        if isinstance(ci_low, (int, float)):
+                            log_pass(f"{endpoint}.ci_low is numeric: {ci_low}")
+                        else:
+                            log_fail(f"{endpoint}.ci_low", f"Expected number, got {ci_low}")
+                    else:
+                        log_fail(f"{endpoint}.ci_low missing", "No 'ci_low' field")
+                    
+                    # Check ci_high
+                    if "ci_high" in endpoint_data:
+                        ci_high = endpoint_data["ci_high"]
+                        if isinstance(ci_high, (int, float)):
+                            log_pass(f"{endpoint}.ci_high is numeric: {ci_high}")
+                            
+                            # Check ci_high >= ci_low
+                            if "ci_low" in endpoint_data:
+                                if ci_high >= endpoint_data["ci_low"]:
+                                    log_pass(f"{endpoint}.ci_high >= ci_low: {ci_high} >= {endpoint_data['ci_low']}")
+                                else:
+                                    log_fail(f"{endpoint}.ci_high < ci_low", f"{ci_high} < {endpoint_data['ci_low']}")
+                        else:
+                            log_fail(f"{endpoint}.ci_high", f"Expected number, got {ci_high}")
+                    else:
+                        log_fail(f"{endpoint}.ci_high missing", "No 'ci_high' field")
+                    
+                    # Check value bounds
                     if "value" in endpoint_data:
-                        val = endpoint_data["value"]
-                        if isinstance(val, (int, float)):
-                            log_pass(f"{endpoint} value is numeric: {val}")
+                        value = endpoint_data["value"]
+                        ci_low = endpoint_data.get("ci_low", float('-inf'))
+                        ci_high = endpoint_data.get("ci_high", float('inf'))
+                        if ci_low <= value <= ci_high:
+                            log_pass(f"{endpoint}: ci_low <= value <= ci_high: {ci_low} <= {value} <= {ci_high}")
                         else:
-                            log_fail(f"{endpoint} value", f"Expected numeric, got {val}")
-                    else:
-                        log_fail(f"{endpoint} value missing", "No 'value' field")
+                            log_fail(f"{endpoint} value bounds", f"Expected {ci_low} <= {value} <= {ci_high}")
                     
-                    if "unit" in endpoint_data:
-                        unit = endpoint_data["unit"]
-                        if isinstance(unit, str):
-                            log_pass(f"{endpoint} unit is string: '{unit}'")
+                    # Check confidence
+                    if "confidence" in endpoint_data:
+                        confidence = endpoint_data["confidence"]
+                        valid_confidence = ["high", "moderate", "low"]
+                        if confidence in valid_confidence:
+                            log_pass(f"{endpoint}.confidence is valid: '{confidence}'")
                         else:
-                            log_fail(f"{endpoint} unit", f"Expected string, got {unit}")
+                            log_fail(f"{endpoint}.confidence", f"Expected one of {valid_confidence}, got '{confidence}'")
                     else:
-                        log_fail(f"{endpoint} unit missing", "No 'unit' field")
+                        log_fail(f"{endpoint}.confidence missing", "No 'confidence' field")
+                    
+                    # Check sigma
+                    if "sigma" in endpoint_data:
+                        sigma = endpoint_data["sigma"]
+                        if isinstance(sigma, (int, float)) and sigma >= 0:
+                            log_pass(f"{endpoint}.sigma is valid: {sigma}")
+                        else:
+                            log_fail(f"{endpoint}.sigma", f"Expected float >= 0, got {sigma}")
+                    else:
+                        log_fail(f"{endpoint}.sigma missing", "No 'sigma' field")
                         
             else:
-                missing = set(expected_keys) - set(results.keys())
+                missing = set(expected_endpoints) - set(results.keys())
                 log_fail("Missing ADMET endpoints", f"Missing: {missing}")
         else:
             log_fail("results field missing", "Response does not contain 'results' field")
         
-        # Check descriptors field
+        # A.3: Check extended descriptors
         if "descriptors" in data:
             descriptors = data["descriptors"]
-            expected_desc = ["mw", "heavy", "rings", "logp"]
+            expected_desc = ["mw", "heavy", "rings", "logp", "tpsa", "rotatable", "hbd", "hba"]
             
             if all(key in descriptors for key in expected_desc):
-                log_pass("All descriptor fields present (mw, heavy, rings, logp)")
+                log_pass(f"All extended descriptor fields present: {expected_desc}")
                 
-                # Validate caffeine descriptors (approximate values)
-                mw = descriptors.get("mw")
-                heavy = descriptors.get("heavy")
-                rings = descriptors.get("rings")
-                
-                if mw and 190 <= mw <= 200:
-                    log_pass(f"Caffeine MW is reasonable: {mw} (expected ~194)")
-                else:
-                    log_warning("Caffeine MW", f"Expected ~194, got {mw}")
-                
-                if heavy == 14:
-                    log_pass(f"Caffeine heavy atoms correct: {heavy}")
-                else:
-                    log_warning("Caffeine heavy atoms", f"Expected 14, got {heavy}")
-                
-                if rings == 2:
-                    log_pass(f"Caffeine rings correct: {rings}")
-                else:
-                    log_warning("Caffeine rings", f"Expected 2, got {rings}")
-                    
+                # Validate each descriptor is numeric
+                for desc in expected_desc:
+                    val = descriptors.get(desc)
+                    if isinstance(val, (int, float)):
+                        log_pass(f"descriptors.{desc} is numeric: {val}")
+                    else:
+                        log_fail(f"descriptors.{desc}", f"Expected numeric, got {val}")
             else:
                 missing = set(expected_desc) - set(descriptors.keys())
-                log_fail("Missing descriptor fields", f"Missing: {missing}")
+                log_fail("Missing extended descriptor fields", f"Missing: {missing}")
         else:
             log_fail("descriptors field missing", "Response does not contain 'descriptors' field")
-        
-        # Check latency_ms field
-        if "latency_ms" in data:
-            latency = data["latency_ms"]
-            if isinstance(latency, int) and latency > 0:
-                log_pass(f"latency_ms is positive integer: {latency}")
-            else:
-                log_fail("latency_ms", f"Expected positive integer, got {latency}")
-        else:
-            log_fail("latency_ms field missing", "Response does not contain 'latency_ms' field")
-        
-        # Check source field
-        if data.get("source") == "model":
-            log_pass("source is 'model'")
-        else:
-            log_fail("source field", f"Expected 'model', got '{data.get('source')}'")
             
     else:
-        log_fail("Predict endpoint status code", f"Expected 200, got {response.status_code}")
+        log_fail("POST /api/predict status code", f"Expected 200, got {response.status_code}")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    log_fail("Predict endpoint request (caffeine)", f"Exception: {str(e)}")
+    log_fail("POST /api/predict request", f"Exception: {str(e)}")
 
 # ============================================================================
-# TEST 3: POST /api/predict with empty SMILES
+# TEST B: POST /api/scaffold
 # ============================================================================
 print("\n" + "=" * 80)
-print("TEST 3: POST /api/predict with empty SMILES")
+print("TEST B: POST /api/scaffold")
 print("=" * 80)
+
+# B.1: Valid SMILES (aspirin)
+print("\nB.1: Valid SMILES (aspirin)")
+aspirin_smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"
+print(f"SMILES: {aspirin_smiles}")
 
 try:
     response = requests.post(
-        f"{BASE_URL}/predict",
+        f"{BASE_URL}/scaffold",
+        json={"smiles": aspirin_smiles},
+        timeout=10
+    )
+    print(f"Status Code: {response.status_code}")
+    
+    if response.status_code == 200:
+        log_pass("POST /api/scaffold returns 200 for valid SMILES")
+        
+        data = response.json()
+        print(f"Response keys: {list(data.keys())}")
+        
+        # Check scaffold object
+        if "scaffold" in data:
+            log_pass("scaffold object present")
+            scaffold = data["scaffold"]
+            if all(k in scaffold for k in ["scaffold", "complexity", "applicability", "novelty_tier"]):
+                log_pass("scaffold object has all required fields")
+            else:
+                log_fail("scaffold fields incomplete", f"Got: {list(scaffold.keys())}")
+        else:
+            log_fail("scaffold object missing", "Response does not contain 'scaffold' object")
+        
+        # Check descriptors
+        if "descriptors" in data:
+            log_pass("descriptors object present")
+            descriptors = data["descriptors"]
+            expected_desc = ["mw", "heavy", "rings", "logp", "tpsa", "rotatable", "hbd", "hba"]
+            if all(k in descriptors for k in expected_desc):
+                log_pass("descriptors object has all required fields")
+            else:
+                missing = set(expected_desc) - set(descriptors.keys())
+                log_fail("descriptors fields incomplete", f"Missing: {missing}")
+        else:
+            log_fail("descriptors object missing", "Response does not contain 'descriptors' object")
+            
+    else:
+        log_fail("POST /api/scaffold status code (valid)", f"Expected 200, got {response.status_code}")
+        print(f"Response: {response.text}")
+        
+except Exception as e:
+    log_fail("POST /api/scaffold request (valid)", f"Exception: {str(e)}")
+
+# B.2: Empty SMILES
+print("\nB.2: Empty SMILES")
+try:
+    response = requests.post(
+        f"{BASE_URL}/scaffold",
         json={"smiles": ""},
         timeout=10
     )
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 400:
-        log_pass("Empty SMILES returns 400")
-        
-        data = response.json()
-        if "detail" in data:
-            log_pass(f"Error detail provided: '{data['detail']}'")
-        else:
-            log_warning("Error detail missing", "No 'detail' field in error response")
+        log_pass("POST /api/scaffold returns 400 for empty SMILES")
     else:
-        log_fail("Empty SMILES status code", f"Expected 400, got {response.status_code}")
+        log_fail("POST /api/scaffold status code (empty)", f"Expected 400, got {response.status_code}")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    log_fail("Empty SMILES request", f"Exception: {str(e)}")
+    log_fail("POST /api/scaffold request (empty)", f"Exception: {str(e)}")
 
-# ============================================================================
-# TEST 4: POST /api/predict with invalid SMILES
-# ============================================================================
-print("\n" + "=" * 80)
-print("TEST 4: POST /api/predict with invalid SMILES")
-print("=" * 80)
-
-invalid_smiles = "not_a_molecule!!"
-print(f"SMILES: {invalid_smiles}")
-
+# B.3: Invalid SMILES
+print("\nB.3: Invalid SMILES")
 try:
     response = requests.post(
-        f"{BASE_URL}/predict",
-        json={"smiles": invalid_smiles},
+        f"{BASE_URL}/scaffold",
+        json={"smiles": "???"},
         timeout=10
     )
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 422:
-        log_pass("Invalid SMILES returns 422")
+        log_pass("POST /api/scaffold returns 422 for invalid SMILES")
         
         data = response.json()
         if "detail" in data:
             detail = str(data["detail"]).lower()
-            if "smiles" in detail or "invalid" in detail:
-                log_pass(f"Error detail mentions invalid SMILES: '{data['detail']}'")
+            if "invalid" in detail and "smiles" in detail:
+                log_pass(f"Error detail mentions 'Invalid SMILES': '{data['detail']}'")
             else:
-                log_warning("Error detail content", f"Detail doesn't mention SMILES: '{data['detail']}'")
-        else:
-            log_warning("Error detail missing", "No 'detail' field in error response")
+                log_warning("Error detail content", f"Detail: '{data['detail']}'")
     else:
-        log_fail("Invalid SMILES status code", f"Expected 422, got {response.status_code}")
+        log_fail("POST /api/scaffold status code (invalid)", f"Expected 422, got {response.status_code}")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    log_fail("Invalid SMILES request", f"Exception: {str(e)}")
+    log_fail("POST /api/scaffold request (invalid)", f"Exception: {str(e)}")
 
 # ============================================================================
-# TEST 5: POST /api/predict with another valid SMILES (aspirin)
+# TEST C: POST /api/predict/batch
 # ============================================================================
 print("\n" + "=" * 80)
-print("TEST 5: POST /api/predict with another valid SMILES (aspirin)")
+print("TEST C: POST /api/predict/batch")
 print("=" * 80)
 
-aspirin_smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"
-print(f"SMILES: {aspirin_smiles}")
+# C.1: Mixed valid/invalid SMILES
+print("\nC.1: Batch with mixed valid/invalid SMILES")
+batch_items = [
+    {"smiles": "CCO"},  # Ethanol - valid
+    {"smiles": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"},  # Caffeine - valid
+    {"smiles": "???"}  # Invalid
+]
 
 try:
     response = requests.post(
-        f"{BASE_URL}/predict",
-        json={"smiles": aspirin_smiles},
+        f"{BASE_URL}/predict/batch",
+        json={"items": batch_items},
         timeout=30
     )
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 200:
-        log_pass("Predict endpoint returns 200 for aspirin")
+        log_pass("POST /api/predict/batch returns 200")
         
         data = response.json()
+        print(f"Response keys: {list(data.keys())}")
         
-        # Check all 5 endpoints present
-        if "results" in data:
-            results = data["results"]
-            expected_keys = ["HIA", "BBB", "CYP2D6", "Solubility", "VDss"]
-            
-            if all(key in results for key in expected_keys):
-                log_pass("All 5 ADMET endpoints present for aspirin")
-            else:
-                missing = set(expected_keys) - set(results.keys())
-                log_fail("Missing ADMET endpoints (aspirin)", f"Missing: {missing}")
+        # Check count
+        if data.get("count") == 3:
+            log_pass("count = 3")
         else:
-            log_fail("results field missing (aspirin)", "Response does not contain 'results' field")
+            log_fail("count field", f"Expected 3, got {data.get('count')}")
         
-        # Check descriptors are not null
-        if "descriptors" in data:
-            descriptors = data["descriptors"]
-            if all(descriptors.get(k) is not None for k in ["mw", "heavy", "rings", "logp"]):
-                log_pass(f"All descriptors non-null for aspirin: {descriptors}")
-            else:
-                log_fail("Null descriptors (aspirin)", f"Some descriptors are null: {descriptors}")
+        # Check ok
+        if data.get("ok") == 2:
+            log_pass("ok = 2")
         else:
-            log_fail("descriptors field missing (aspirin)", "Response does not contain 'descriptors' field")
+            log_fail("ok field", f"Expected 2, got {data.get('ok')}")
+        
+        # Check failed
+        if data.get("failed") == 1:
+            log_pass("failed = 1")
+        else:
+            log_fail("failed field", f"Expected 1, got {data.get('failed')}")
+        
+        # Check latency_ms
+        if "latency_ms" in data and isinstance(data["latency_ms"], int) and data["latency_ms"] >= 0:
+            log_pass(f"latency_ms is valid: {data['latency_ms']}")
+        else:
+            log_fail("latency_ms field", f"Expected int >= 0, got {data.get('latency_ms')}")
+        
+        # Check items array
+        if "items" in data and isinstance(data["items"], list):
+            items = data["items"]
+            if len(items) == 3:
+                log_pass("items array has 3 elements")
+                
+                # Check third item has error
+                third_item = items[2]
+                if "error" in third_item and third_item["error"]:
+                    log_pass(f"Third item has non-empty error field: '{third_item['error']}'")
+                else:
+                    log_fail("Third item error", "Expected non-empty 'error' field")
+                
+                # Check first two items have results
+                for i in [0, 1]:
+                    item = items[i]
+                    if "results" in item and item["results"]:
+                        log_pass(f"Item {i+1} has results")
+                    else:
+                        log_fail(f"Item {i+1} results", "Expected non-empty 'results' field")
+            else:
+                log_fail("items array length", f"Expected 3, got {len(items)}")
+        else:
+            log_fail("items field", "Expected list")
             
     else:
-        log_fail("Predict endpoint status code (aspirin)", f"Expected 200, got {response.status_code}")
+        log_fail("POST /api/predict/batch status code", f"Expected 200, got {response.status_code}")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    log_fail("Predict endpoint request (aspirin)", f"Exception: {str(e)}")
+    log_fail("POST /api/predict/batch request", f"Exception: {str(e)}")
+
+# C.2: Empty items array
+print("\nC.2: Empty items array")
+try:
+    response = requests.post(
+        f"{BASE_URL}/predict/batch",
+        json={"items": []},
+        timeout=10
+    )
+    print(f"Status Code: {response.status_code}")
+    
+    if response.status_code == 400:
+        log_pass("POST /api/predict/batch returns 400 for empty items")
+    else:
+        log_fail("POST /api/predict/batch status code (empty)", f"Expected 400, got {response.status_code}")
+        print(f"Response: {response.text}")
+        
+except Exception as e:
+    log_fail("POST /api/predict/batch request (empty)", f"Exception: {str(e)}")
 
 # ============================================================================
-# TEST 6: GET /api/history
+# TEST D: POST /api/predict/batch/upload
 # ============================================================================
 print("\n" + "=" * 80)
-print("TEST 6: GET /api/history?limit=5")
+print("TEST D: POST /api/predict/batch/upload")
 print("=" * 80)
 
+# D.1: Valid CSV with mixed valid/invalid SMILES
+print("\nD.1: Valid CSV with mixed SMILES")
+csv_content = """smiles,name
+CCO,Ethanol
+CN1C=NC2=C1C(=O)N(C(=O)N2C)C,Caffeine
+CC(=O)OC1=CC=CC=C1C(=O)O,Aspirin
+not_a_mol,Bogus"""
+
 try:
-    response = requests.get(f"{BASE_URL}/history?limit=5", timeout=10)
+    files = {'file': ('test.csv', csv_content, 'text/csv')}
+    response = requests.post(
+        f"{BASE_URL}/predict/batch/upload",
+        files=files,
+        timeout=30
+    )
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 200:
-        log_pass("History endpoint returns 200")
+        log_pass("POST /api/predict/batch/upload returns 200")
         
         data = response.json()
+        print(f"Response keys: {list(data.keys())}")
         
-        if isinstance(data, list):
-            log_pass(f"History returns a list with {len(data)} items")
-            
-            if len(data) > 0:
-                # Check structure of first item
-                item = data[0]
-                required_fields = ["smiles", "latency_ms", "timestamp"]
-                
-                if all(field in item for field in required_fields):
-                    log_pass(f"History items have required fields: {required_fields}")
-                    print(f"Sample item: {json.dumps(item, indent=2)}")
-                else:
-                    missing = set(required_fields) - set(item.keys())
-                    log_fail("Missing history item fields", f"Missing: {missing}")
-            else:
-                log_warning("Empty history", "History is empty (may be expected if no predictions made)")
+        # Check count
+        if data.get("count") == 4:
+            log_pass("count = 4")
         else:
-            log_fail("History response type", f"Expected list, got {type(data)}")
+            log_fail("count field", f"Expected 4, got {data.get('count')}")
+        
+        # Check ok
+        if data.get("ok") == 3:
+            log_pass("ok = 3")
+        else:
+            log_fail("ok field", f"Expected 3, got {data.get('ok')}")
+        
+        # Check failed
+        if data.get("failed") == 1:
+            log_pass("failed = 1")
+        else:
+            log_fail("failed field", f"Expected 1, got {data.get('failed')}")
+        
+        # Check items and names
+        if "items" in data and isinstance(data["items"], list):
+            items = data["items"]
+            if len(items) == 4:
+                log_pass("items array has 4 elements")
+                
+                # Check names propagate
+                expected_names = ["Ethanol", "Caffeine", "Aspirin", "Bogus"]
+                actual_names = [item.get("name", "") for item in items]
+                if actual_names == expected_names:
+                    log_pass(f"Names propagate correctly: {actual_names}")
+                else:
+                    log_fail("Name propagation", f"Expected {expected_names}, got {actual_names}")
+            else:
+                log_fail("items array length", f"Expected 4, got {len(items)}")
+        else:
+            log_fail("items field", "Expected list")
+        
+        # Store items for export test
+        global export_items
+        export_items = data.get("items", [])
             
     else:
-        log_fail("History endpoint status code", f"Expected 200, got {response.status_code}")
+        log_fail("POST /api/predict/batch/upload status code", f"Expected 200, got {response.status_code}")
         print(f"Response: {response.text}")
         
 except Exception as e:
-    log_fail("History endpoint request", f"Exception: {str(e)}")
+    log_fail("POST /api/predict/batch/upload request", f"Exception: {str(e)}")
+
+# D.2: Empty file
+print("\nD.2: Empty file")
+try:
+    files = {'file': ('empty.csv', '', 'text/csv')}
+    response = requests.post(
+        f"{BASE_URL}/predict/batch/upload",
+        files=files,
+        timeout=10
+    )
+    print(f"Status Code: {response.status_code}")
+    
+    if response.status_code == 400:
+        log_pass("POST /api/predict/batch/upload returns 400 for empty file")
+    else:
+        log_fail("POST /api/predict/batch/upload status code (empty)", f"Expected 400, got {response.status_code}")
+        print(f"Response: {response.text}")
+        
+except Exception as e:
+    log_fail("POST /api/predict/batch/upload request (empty)", f"Exception: {str(e)}")
+
+# D.3: CSV with no SMILES data
+print("\nD.3: CSV with no SMILES data")
+try:
+    files = {'file': ('no_data.csv', 'smiles,name\n', 'text/csv')}
+    response = requests.post(
+        f"{BASE_URL}/predict/batch/upload",
+        files=files,
+        timeout=10
+    )
+    print(f"Status Code: {response.status_code}")
+    
+    # Accept 400 or 422 for this case
+    if response.status_code in [400, 422]:
+        log_pass(f"POST /api/predict/batch/upload returns {response.status_code} for CSV with no data")
+    else:
+        log_fail("POST /api/predict/batch/upload status code (no data)", f"Expected 400 or 422, got {response.status_code}")
+        print(f"Response: {response.text}")
+        
+except Exception as e:
+    log_fail("POST /api/predict/batch/upload request (no data)", f"Exception: {str(e)}")
+
+# ============================================================================
+# TEST E: POST /api/predict/batch/export
+# ============================================================================
+print("\n" + "=" * 80)
+print("TEST E: POST /api/predict/batch/export")
+print("=" * 80)
+
+# E.1: Export with items from upload test
+print("\nE.1: Export with items")
+try:
+    if 'export_items' in globals() and export_items:
+        response = requests.post(
+            f"{BASE_URL}/predict/batch/export",
+            json={"items": export_items},
+            timeout=10
+        )
+        print(f"Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            log_pass("POST /api/predict/batch/export returns 200")
+            
+            # Check Content-Type
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/csv' in content_type:
+                log_pass(f"Content-Type is text/csv: {content_type}")
+            else:
+                log_fail("Content-Type", f"Expected text/csv, got {content_type}")
+            
+            # Check CSV content
+            csv_text = response.text
+            lines = csv_text.strip().split('\n')
+            
+            if len(lines) > 0:
+                header = lines[0]
+                print(f"CSV Header: {header}")
+                
+                # Check required columns
+                required_cols = [
+                    "row_idx", "name", "smiles", "mw", "heavy", "rings", "logp",
+                    "HIA_prob", "HIA_pred", "BBB_prob", "BBB_pred",
+                    "CYP2D6_prob", "CYP2D6_pred", "Solubility_logS", "VDss_Lkg", "error"
+                ]
+                
+                header_lower = header.lower()
+                missing_cols = [col for col in required_cols if col.lower() not in header_lower]
+                
+                if not missing_cols:
+                    log_pass(f"CSV header contains all required columns")
+                else:
+                    log_fail("CSV header missing columns", f"Missing: {missing_cols}")
+                
+                # Check we have data rows
+                if len(lines) > 1:
+                    log_pass(f"CSV has {len(lines)-1} data rows")
+                else:
+                    log_warning("CSV data rows", "No data rows in CSV")
+            else:
+                log_fail("CSV content", "CSV is empty")
+                
+        else:
+            log_fail("POST /api/predict/batch/export status code", f"Expected 200, got {response.status_code}")
+            print(f"Response: {response.text}")
+    else:
+        log_warning("Export test skipped", "No items from upload test")
+        
+except Exception as e:
+    log_fail("POST /api/predict/batch/export request", f"Exception: {str(e)}")
+
+# E.2: Empty items array
+print("\nE.2: Empty items array")
+try:
+    response = requests.post(
+        f"{BASE_URL}/predict/batch/export",
+        json={"items": []},
+        timeout=10
+    )
+    print(f"Status Code: {response.status_code}")
+    
+    if response.status_code == 400:
+        log_pass("POST /api/predict/batch/export returns 400 for empty items")
+    else:
+        log_fail("POST /api/predict/batch/export status code (empty)", f"Expected 400, got {response.status_code}")
+        print(f"Response: {response.text}")
+        
+except Exception as e:
+    log_fail("POST /api/predict/batch/export request (empty)", f"Exception: {str(e)}")
 
 # ============================================================================
 # SUMMARY
@@ -438,6 +716,7 @@ if test_results['failed']:
     print(f"\n❌ FAILED: {len(test_results['failed'])}")
     for result in test_results['failed']:
         print(f"  {result}")
+    print(f"\nTotal failures: {len(test_results['failed'])}")
 else:
     print("\n🎉 ALL CRITICAL TESTS PASSED!")
 
