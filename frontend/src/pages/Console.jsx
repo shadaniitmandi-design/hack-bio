@@ -264,7 +264,7 @@ export default function Console() {
         <button
           onClick={() => setTab("single")}
           className={`mono text-[11px] uppercase tracking-[0.22em] px-4 py-3 border-b -mb-px ${
-            tab === "single" ? "ink border-[rgb(210_255_62)]" : "ink-mute border-transparent"
+            tab === "single" ? "ink border-[rgb(93_227_255)]" : "ink-mute border-transparent"
           } flex items-center gap-2`}
         >
           <Layers size={12} /> Single molecule
@@ -273,7 +273,7 @@ export default function Console() {
           onClick={() => setTab("batch")}
           data-testid="batch-tab"
           className={`mono text-[11px] uppercase tracking-[0.22em] px-4 py-3 border-b -mb-px ${
-            tab === "batch" ? "ink border-[rgb(210_255_62)]" : "ink-mute border-transparent"
+            tab === "batch" ? "ink border-[rgb(93_227_255)]" : "ink-mute border-transparent"
           } flex items-center gap-2`}
         >
           <FileUp size={12} /> Batch CSV

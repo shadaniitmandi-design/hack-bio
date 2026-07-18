@@ -69,12 +69,12 @@ export default function Landing() {
         </div>
 
         <div className="col-span-12 lg:col-span-5 relative">
-          <div className="relative border hairline p-4 bg-soft floaty">
+          <div className="relative border hairline p-4 bg-soft floaty ring-cyan">
             <img
               src={HERO_IMG}
               alt="Conformational space visualization"
-              className="w-full h-[420px] object-cover grayscale-[0.05] contrast-[1.05] saturate-[0.85]"
-              style={{ filter: "hue-rotate(-8deg)" }}
+              className="w-full h-[420px] object-cover"
+              style={{ filter: "hue-rotate(60deg) saturate(1.05) brightness(0.9) contrast(1.1)" }}
             />
             <div className="absolute inset-4 pointer-events-none border hairline-soft mix-blend-overlay" />
             <div className="flex items-center justify-between mt-3 mono text-[11px] ink-mute uppercase tracking-[0.22em]">
@@ -137,7 +137,7 @@ export default function Landing() {
       {/* Split feature */}
       <section className="max-w-[1400px] mx-auto px-8 pt-28 grid grid-cols-12 gap-8">
         <div className="col-span-12 lg:col-span-5">
-          <img src={LOWER_IMG} alt="molecular flow" className="w-full h-[500px] object-cover border hairline" style={{ filter: "saturate(0.7) contrast(1.05)" }} />
+          <img src={LOWER_IMG} alt="molecular flow" className="w-full h-[500px] object-cover border hairline" style={{ filter: "hue-rotate(60deg) saturate(1.05) brightness(0.9) contrast(1.05)" }} />
           <div className="mono text-[11px] ink-mute uppercase tracking-[0.22em] mt-3 flex justify-between">
             <span>Fig. 02</span><span>Latent Manifold</span>
           </div>

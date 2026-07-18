@@ -6,11 +6,13 @@ import Landing from "./pages/Landing";
 import Console from "./pages/Console";
 import Pipeline from "./pages/Pipeline";
 import Footer from "./components/Footer";
+import BioBackground from "./components/BioBackground";
 import { Toaster } from "./components/ui/sonner";
 
 function App() {
   return (
     <div className="App grain">
+      <BioBackground />
       <BrowserRouter>
         <Nav />
         <Routes>

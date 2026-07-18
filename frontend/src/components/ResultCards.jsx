@@ -4,7 +4,7 @@ import { fmtPct, fmtNum, classFromProb, solubilityTone } from "../lib/format";
 
 function ConfidenceRow({ tier }) {
   const map = {
-    high: { label: "HIGH CONFIDENCE", cls: "lime", bar: "bg-[rgb(210_255_62)]" },
+    high: { label: "HIGH CONFIDENCE", cls: "lime", bar: "bg-[rgb(93_227_255)]" },
     moderate: { label: "MODERATE CONFIDENCE", cls: "text-[rgb(255_176_66)]", bar: "bg-[rgb(255_176_66)]" },
     low: { label: "LOW CONFIDENCE", cls: "text-[rgb(255_74_128)]", bar: "bg-[rgb(255_74_128)]" },
   };
@@ -29,7 +29,7 @@ function CIStrip({ lo, hi, value, min, max, tone }) {
   const l = ((clamp(lo) - min) / range) * 100;
   const h = ((clamp(hi) - min) / range) * 100;
   const p = ((clamp(value) - min) / range) * 100;
-  const color = tone === "lime" ? "rgb(210 255 62)" : tone === "warn" ? "rgb(255 176 66)" : "rgb(255 74 128)";
+  const color = tone === "lime" ? "rgb(93 227 255)" : tone === "warn" ? "rgb(255 176 66)" : "rgb(255 74 128)";
   return (
     <div className="mt-4">
       <div className="relative h-[6px] w-full bg-[rgb(30_33_30)]">

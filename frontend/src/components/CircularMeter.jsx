@@ -14,12 +14,12 @@ export default function CircularMeter({ value = 0.5, tone = "lime", size = 120, 
 
   const color =
     tone === "lime"
-      ? "rgb(210 255 62)"
+      ? "rgb(93 227 255)"
       : tone === "pink"
       ? "rgb(255 74 128)"
       : tone === "warn"
       ? "rgb(255 176 66)"
-      : "rgb(210 255 62)";
+      : "rgb(93 227 255)";
 
   return (
     <div className="relative inline-block" style={{ width: size, height: size }}>
