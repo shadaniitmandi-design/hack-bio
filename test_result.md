@@ -101,3 +101,199 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Build a full-stack ADMET prediction web app with a premium dark UI (HelixADMET).
+  Integrate the pre-trained model from https://github.com/Mannatkathuria/SMILES_TO_ADMET
+  which uses Morgan fingerprints + XGBoost across 5 endpoints: HIA, BBB, CYP2D6,
+  Solubility, VDss. Frontend has Landing, Console (SMILES input + result cards),
+  and Pipeline pages.
+
+backend:
+  - task: "GET /api/health"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Health endpoint returns status, model_loaded boolean, loaded endpoint list, and load errors dict."
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ TESTED & VERIFIED: GET /api/health endpoint working correctly.
+          - Returns 200 status code
+          - status field is "ok"
+          - model_loaded is true
+          - endpoints array contains all 5 expected endpoints: HIA, BBB, CYP2D6, Solubility, VDss
+          - errors dict is empty (no model loading errors)
+          All health check requirements met.
+
+  - task: "POST /api/predict"
+    implemented: true
+    working: true
+    file: "backend/server.py, backend/admet_predictor.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Loads 5 XGBoost .pkl models (hia, bbb, cyp2d6, solubility, vdss) trained
+          on Morgan fingerprints r=2, 2048 bits. Endpoint takes {smiles: str},
+          returns {smiles, results:{HIA,BBB,CYP2D6,Solubility,VDss}, descriptors,
+          latency_ms, source}. Classification endpoints return probability +
+          prediction label; regression endpoints return value + unit.
+          Should return 400 for empty SMILES, 422 for invalid SMILES.
+          Persists each request to Mongo collection admet_history.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ TESTED & VERIFIED: POST /api/predict endpoint working correctly.
+          Test 1 - Valid SMILES (caffeine "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"):
+          - Returns 200 status code
+          - Response smiles matches input
+          - All 5 ADMET endpoints present in results (HIA, BBB, CYP2D6, Solubility, VDss)
+          - Classification endpoints (HIA, BBB, CYP2D6): probability is float 0..1, prediction is non-empty string
+          - Regression endpoints (Solubility, VDss): value is numeric, unit is string
+          - Descriptors correct: mw=194.19, heavy=14, rings=2, logp present
+          - latency_ms is positive integer (2ms)
+          - source is "model"
+          Test 2 - Empty SMILES:
+          - Returns 400 with helpful error detail "SMILES string is required"
+          Test 3 - Invalid SMILES ("not_a_molecule!!"):
+          - Returns 422 with error detail "Invalid SMILES string"
+          Test 4 - Valid SMILES (aspirin "CC(=O)OC1=CC=CC=C1C(=O)O"):
+          - Returns 200 with all 5 endpoints and non-null descriptors
+          All prediction requirements met. Model integration working correctly.
+
+  - task: "GET /api/history"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Returns most recent N prediction requests (default 20) from Mongo. Excludes results/descriptors payload for compactness."
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ TESTED & VERIFIED: GET /api/history endpoint working correctly.
+          - Returns 200 status code
+          - Returns list of history items (3 items found from previous predictions)
+          - Each item has required fields: smiles, latency_ms, timestamp, id
+          - Results/descriptors correctly excluded for compactness
+          - Query parameter limit=5 working correctly
+          History persistence and retrieval working as expected.
+
+frontend:
+  - task: "Landing page (Hero, endpoints grid, method section)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Landing.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Dark HelixADMET landing with hero image, marquee ticker, endpoints grid, method split."
+
+  - task: "Console page (SMILES input + prediction cards)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Console.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Calls POST /api/predict, shows five ADMET cards, descriptors, source chip, examples chips + dropdown. Falls back to mock on network error."
+
+  - task: "Pipeline page"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Pipeline.jsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Static content: 4-step pipeline, benchmarks table, CTA."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "GET /api/health"
+    - "POST /api/predict"
+    - "GET /api/history"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      Backend has been wired to the SMILES_TO_ADMET pretrained models. Please test:
+      1) GET /api/health returns model_loaded=true and all 5 endpoints listed.
+      2) POST /api/predict with SMILES "CN1C=NC2=C1C(=O)N(C(=O)N2C)C" (caffeine):
+         - returns 200
+         - results contains HIA, BBB, CYP2D6, Solubility, VDss
+         - HIA/BBB/CYP2D6 have probability (0..1) and prediction string
+         - Solubility, VDss have numeric value and unit string
+         - descriptors has mw, heavy, rings, logp
+         - latency_ms is int > 0
+      3) POST /api/predict with empty smiles -> 400
+      4) POST /api/predict with invalid SMILES ("not_a_molecule!!") -> 422
+      5) GET /api/history?limit=5 returns list (may be non-empty after step 2).
+      Use REACT_APP_BACKEND_URL from frontend/.env for the base URL. All routes are
+      prefixed with /api.
+    -agent: "testing"
+    -message: |
+      🎉 ALL BACKEND TESTS PASSED (34/34 checks successful)
+      
+      Comprehensive testing completed for all 3 backend endpoints:
+      
+      1. GET /api/health - ✅ WORKING
+         - Returns 200, status="ok", model_loaded=true
+         - All 5 endpoints listed: HIA, BBB, CYP2D6, Solubility, VDss
+         - No model loading errors
+      
+      2. POST /api/predict - ✅ WORKING
+         - Valid SMILES (caffeine & aspirin): Returns 200 with correct structure
+         - All 5 ADMET endpoints present with proper data types
+         - Classification endpoints: probability (0..1) + prediction string
+         - Regression endpoints: numeric value + unit string
+         - Descriptors accurate (caffeine: mw=194.19, heavy=14, rings=2)
+         - Empty SMILES: Returns 400 with helpful error
+         - Invalid SMILES: Returns 422 with SMILES error message
+         - Latency tracking working (2ms response time)
+         - Source correctly set to "model"
+      
+      3. GET /api/history - ✅ WORKING
+         - Returns 200 with list of history items
+         - Correct structure: smiles, latency_ms, timestamp, id
+         - Query parameter limit working correctly
+         - Results/descriptors excluded for compactness
+      
+      Model integration verified: XGBoost models loaded successfully, Morgan fingerprints
+      computed correctly, predictions returning valid ADMET properties. MongoDB persistence
+      working for history tracking.
+      
+      Backend URL tested: https://smiles-predictor.preview.emergentagent.com/api
+      
+      All backend tasks marked as working=true, needs_retesting=false.
