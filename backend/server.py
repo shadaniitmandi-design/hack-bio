@@ -133,14 +133,16 @@ async def scaffold_endpoint(req: ScaffoldRequest):
     if not smiles:
         raise HTTPException(status_code=400, detail="SMILES string is required")
     predictor = get_predictor()
+    # Validate SMILES first for consistent 422 on invalid input
     try:
-        return {
-            "smiles": smiles,
-            "scaffold": predictor.scaffold_info(smiles),
-            "descriptors": predictor.descriptors(smiles),
-        }
+        predictor._mol(smiles)
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
+    return {
+        "smiles": smiles,
+        "scaffold": predictor.scaffold_info(smiles),
+        "descriptors": predictor.descriptors(smiles),
+    }
 
 
 # ---------- Batch prediction ----------

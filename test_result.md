@@ -207,22 +207,31 @@ backend:
         -working: true
         -agent: "testing"
         -comment: |
-          ✅ TESTED & VERIFIED: POST /api/scaffold working (5/6 checks passed).
+          TESTED (5/6). Minor: invalid SMILES ('???') returned 200 with nulls
+          rather than 422.
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          FIX APPLIED: endpoint now calls predictor._mol(smiles) first and raises
+          HTTPException 422 if RDKit cannot parse it, matching /api/predict.
+          Please re-verify only the invalid-SMILES case: POST {"smiles":"???"}
+          must return 422.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ TESTED & VERIFIED: POST /api/scaffold invalid SMILES fix working perfectly (4/4 checks passed).
           
-          Valid SMILES (aspirin):
-          - Returns 200 with scaffold and descriptors objects
-          - scaffold object has all required fields (scaffold, complexity, applicability, novelty_tier)
-          - descriptors object has all 8 fields (mw, heavy, rings, logp, tpsa, rotatable, hbd, hba)
+          Invalid SMILES handling:
+          - POST {"smiles":"???"} → Returns 422 with {"detail":"Invalid SMILES string"} ✓
+          - POST {"smiles":"not_a_molecule!!"} → Returns 422 with {"detail":"Invalid SMILES string"} ✓
           
-          Empty SMILES:
-          - Returns 400 as expected
+          Regression tests:
+          - POST {"smiles":"CC(=O)OC1=CC=CC=C1C(=O)O"} (aspirin) → Returns 200 with populated scaffold + descriptors ✓
+            - scaffold object: {scaffold: "c1ccccc1", complexity: 0.343, applicability: 1.0, novelty_tier: "in-domain"}
+            - descriptors object: {mw, heavy, rings, logp, tpsa, rotatable, hbd, hba} all present
+          - POST {"smiles":""} → Returns 400 with {"detail":"SMILES string is required"} ✓
           
-          Minor: Invalid SMILES ("???"):
-          - Currently returns 200 with null values instead of 422
-          - This is because scaffold_info() and descriptors() methods in admet_predictor.py handle invalid SMILES gracefully by returning None values instead of raising ValueError
-          - The endpoint doesn't crash and indicates invalid SMILES through null values
-          - For consistency with /api/predict endpoint, should return 422
-          - Not a critical issue as core functionality works correctly
+          Fix verified: Invalid SMILES now correctly return HTTP 422 instead of 200 with nulls.
 
   - task: "POST /api/predict/batch"
     implemented: true
@@ -540,3 +549,20 @@ agent_communication:
       Backend URL tested: https://smiles-predictor.preview.emergentagent.com/api
       
       All backend tasks marked as working=true, needs_retesting=false.
+    -agent: "testing"
+    -message: |
+      ✅ POST /api/scaffold INVALID SMILES FIX VERIFIED (4/4 tests passed)
+      
+      Re-verified the fix for POST /api/scaffold endpoint:
+      
+      Invalid SMILES handling (FIX VERIFIED):
+      1. POST {"smiles":"???"} → ✅ Returns 422 with {"detail":"Invalid SMILES string"}
+      2. POST {"smiles":"not_a_molecule!!"} → ✅ Returns 422 with {"detail":"Invalid SMILES string"}
+      
+      Regression tests (NO BREAKING CHANGES):
+      3. POST {"smiles":"CC(=O)OC1=CC=CC=C1C(=O)O"} (aspirin) → ✅ Returns 200 with scaffold + descriptors
+      4. POST {"smiles":""} → ✅ Returns 400 as expected
+      
+      The fix is working correctly. Invalid SMILES now properly return HTTP 422 instead of 200 with nulls.
+      POST /api/scaffold marked as working=true, needs_retesting=false.
+
